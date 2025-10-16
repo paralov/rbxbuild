@@ -1,8 +1,11 @@
-use std::{collections::HashMap, io::{Read, IsTerminal}};
 use anyhow::Result;
-use serde::Deserialize;
 use rbx_dom_weak::{InstanceBuilder, WeakDom};
 use rbx_xml::to_writer_default;
+use serde::Deserialize;
+use std::{
+    collections::HashMap,
+    io::{IsTerminal, Read},
+};
 
 mod resolution;
 
@@ -23,7 +26,9 @@ fn main() -> Result<()> {
         input
     } else {
         // No input provided
-        eprintln!("Error: No input provided. Please provide JSON as an argument or pipe it to stdin.");
+        eprintln!(
+            "Error: No input provided. Please provide JSON as an argument or pipe it to stdin."
+        );
         eprintln!("Usage: rojo-build-lite '<json>' or echo '<json>' | rojo-build-lite");
         std::process::exit(1);
     };
@@ -49,7 +54,7 @@ fn main() -> Result<()> {
     let mut buffer = Vec::new();
     let root_ref = dom.root_ref();
     let root_instance = dom.get_by_ref(root_ref).unwrap();
-    
+
     let ids_to_write = if root_instance.class == "DataModel" {
         // Place files don't contain an entry for the DataModel
         // Write the children as root-level siblings
@@ -58,7 +63,7 @@ fn main() -> Result<()> {
         // For models, write the root instance
         vec![root_ref]
     };
-    
+
     to_writer_default(&mut buffer, &dom, &ids_to_write)?;
 
     // Print XML to stdout
@@ -72,7 +77,7 @@ fn main() -> Result<()> {
 struct Project {
     /// The name of the top-level instance described by the project.
     pub name: Option<String>,
-   
+
     /// The tree of instances described by this project. Projects always
     /// describe at least one instance.
     pub tree: ProjectNode,
@@ -83,10 +88,10 @@ struct Project {
 pub struct ProjectNode {
     #[serde(rename = "$className")]
     pub class_name: Option<String>,
-    
+
     #[serde(rename = "$properties", default)]
     pub properties: HashMap<String, UnresolvedValue>,
-    
+
     #[serde(flatten)]
     pub children: HashMap<String, ProjectNode>,
 }
@@ -106,12 +111,12 @@ fn instantiate_node(node: &ProjectNode, name: &str) -> Result<InstanceBuilder> {
         // Try to infer from known services
         infer_class_from_name(name).unwrap_or("Folder")
     };
-    
+
     // Check if there's an explicit Name property override
-    let instance_name_override: Option<String> = node.properties.get("Name")
-        .and_then(|name_value| {
-            name_value.clone().resolve_unambiguous().ok()
-        })
+    let instance_name_override: Option<String> = node
+        .properties
+        .get("Name")
+        .and_then(|name_value| name_value.clone().resolve_unambiguous().ok())
         .and_then(|variant| {
             if let rbx_dom_weak::types::Variant::String(s) = variant {
                 Some(s.to_string())
@@ -119,28 +124,31 @@ fn instantiate_node(node: &ProjectNode, name: &str) -> Result<InstanceBuilder> {
                 None
             }
         });
-    
+
     let instance_name = instance_name_override.as_deref().unwrap_or(name);
-    
+
     let mut builder = InstanceBuilder::new(class_name).with_name(instance_name);
-    
+
     // Add properties with proper resolution
     for (key, unresolved) in &node.properties {
         // Skip the "Name" property as it's already set via with_name()
         if key == "Name" {
             continue;
         }
-        
+
         match unresolved.clone().resolve(class_name, key) {
             Ok(variant) => {
                 builder = builder.with_property(key, variant);
             }
             Err(e) => {
-                eprintln!("Warning: Failed to resolve property {}.{}: {}", class_name, key, e);
+                eprintln!(
+                    "Warning: Failed to resolve property {}.{}: {}",
+                    class_name, key, e
+                );
             }
         }
     }
-    
+
     // Add children
     for (child_name, child_node) in &node.children {
         match instantiate_node(child_node, child_name) {
@@ -152,7 +160,7 @@ fn instantiate_node(node: &ProjectNode, name: &str) -> Result<InstanceBuilder> {
             }
         }
     }
-    
+
     Ok(builder)
 }
 
@@ -231,7 +239,7 @@ mod tests {
     //! ```bash
     //! cargo test -- --nocapture
     //! ```
-    
+
     use super::*;
 
     /// Helper function to convert JSON to XML string
@@ -239,17 +247,17 @@ mod tests {
         let project: Project = serde_json::from_str(json_str)?;
         let root_name = project.name.as_deref().unwrap_or("ROOT");
         let dom = instantiate(&project.tree, root_name)?;
-        
+
         let mut buffer = Vec::new();
         let root_ref = dom.root_ref();
         let root_instance = dom.get_by_ref(root_ref).unwrap();
-        
+
         let ids_to_write = if root_instance.class == "DataModel" {
             root_instance.children().to_vec()
         } else {
             vec![root_ref]
         };
-        
+
         to_writer_default(&mut buffer, &dom, &ids_to_write)?;
         Ok(String::from_utf8(buffer)?)
     }
@@ -262,7 +270,7 @@ mod tests {
                 "$className": "Folder"
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
         assert!(xml.contains(r#"<Item class="Folder""#));
         assert!(xml.contains(r#"<string name="Name">TestProject</string>"#));
@@ -286,13 +294,18 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Ensure no duplicate Name properties
-        let name_count = xml.matches(r#"<string name="Name">MyScript</string>"#).count();
-        assert_eq!(name_count, 1, "Name property should appear exactly once, not duplicated");
-        
+        let name_count = xml
+            .matches(r#"<string name="Name">MyScript</string>"#)
+            .count();
+        assert_eq!(
+            name_count, 1,
+            "Name property should appear exactly once, not duplicated"
+        );
+
         // Verify the Source property is also present
         assert!(xml.contains(r#"<string name="Source">print('hello')</string>"#));
     }
@@ -314,9 +327,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Should use the custom name, not the key
         assert!(xml.contains(r#"<string name="Name">CustomPartName</string>"#));
         assert!(!xml.contains(r#"<string name="Name">PartKey</string>"#));
@@ -340,9 +353,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Should infer Workspace class
         assert!(xml.contains(r#"<Item class="Workspace""#));
         // Should infer ReplicatedStorage class
@@ -366,9 +379,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<string name="Name">Test</string>"#));
         assert!(xml.contains(r#"<string name="Name">Child1</string>"#));
         assert!(xml.contains(r#"<string name="Name">Child2</string>"#));
@@ -386,9 +399,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<Item class="Script""#));
         assert!(xml.contains(r#"<string name="Source">print('Hello, World!')</string>"#));
     }
@@ -404,9 +417,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<Vector3 name="size">"#));
         assert!(xml.contains("<X>10</X>"));
         assert!(xml.contains("<Y>20</Y>"));
@@ -424,9 +437,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<bool name="Anchored">true</bool>"#));
     }
 
@@ -441,9 +454,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<float name="Transparency">0.5</float>"#));
     }
 
@@ -458,9 +471,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Color3 gets serialized as Color3uint8 with a packed integer value
         assert!(xml.contains(r#"<Color3uint8 name="Color3uint8">"#));
     }
@@ -479,9 +492,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // DataModel children should be at root level (siblings)
         assert!(!xml.contains(r#"<Item class="DataModel""#));
         assert!(xml.contains(r#"<Item class="Workspace""#));
@@ -499,9 +512,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Model should be included (not like DataModel)
         assert!(xml.contains(r#"<Item class="Model""#));
         assert!(xml.contains(r#"<string name="Name">MyModel</string>"#));
@@ -518,9 +531,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<CoordinateFrame name="CFrame">"#));
         assert!(xml.contains("<X>0</X>"));
         assert!(xml.contains("<Y>10</Y>"));
@@ -538,9 +551,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Material enum should be serialized as token
         assert!(xml.contains(r#"<token name="Material">"#));
     }
@@ -559,9 +572,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         assert!(xml.contains(r#"<Vector3 name="size">"#));
         assert!(xml.contains(r#"<bool name="Anchored">true</bool>"#));
         assert!(xml.contains(r#"<float name="Transparency">0.5</float>"#));
@@ -582,9 +595,9 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let xml = json_to_xml(json).expect("Failed to convert JSON to XML");
-        
+
         // Should default to Folder when no className is specified
         assert!(xml.contains(r#"<string name="Name">SomeFolder</string>"#));
         assert!(xml.contains(r#"<string name="Name">InnerFolder</string>"#));
