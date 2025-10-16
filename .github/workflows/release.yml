@@ -10,34 +10,53 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS native (M1/M2/M3)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: rbxbuild
+
+          # Docker on M1 (ARM Linux)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            artifact_name: rbxbuild
+
+          # Docker on x86 servers
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact_name: rbxbuild
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Get version
         id: version
+        shell: bash
         run: |
           VERSION=$(grep '^version = ' Cargo.toml | cut -d '"' -f2)
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version $VERSION"
+          echo "Version: $VERSION"
 
-      - name: Install Rust & cross
-        run: |
-          rustup update stable
-          cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build all targets
-        run: |
-          cross build --release --target aarch64-apple-darwin
-          cross build --release --target aarch64-unknown-linux-musl
-          cross build --release --target x86_64-unknown-linux-musl
+      - name: Build with actions-rust-cross
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          target: ${{ matrix.target }}
+          command: build
+          args: --release
+          strip: true   # optional: strips symbols, smaller binary
+          use-cross: true
 
       - name: Prepare artifacts
+        shell: bash
         run: |
           mkdir -p release-assets
-          cp target/aarch64-apple-darwin/release/rbxbuild release-assets/rbxbuild-macos-arm64
-          cp target/aarch64-unknown-linux-musl/release/rbxbuild release-assets/rbxbuild-linux-arm64
-          cp target/x86_64-unknown-linux-musl/release/rbxbuild release-assets/rbxbuild-linux-x86_64
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-assets/rbxbuild-${{ matrix.target }}
 
       - name: Create/Update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -48,7 +67,9 @@ jobs:
             Automated release for version ${{ steps.version.outputs.version }}
 
             ## Binaries
-            - macOS (M1/M2/M3): `rbxbuild-macos-arm64`
-            - Linux ARM64 (for Apple Silicon Docker): `rbxbuild-linux-arm64`
-            - Linux x86_64 (for servers): `rbxbuild-linux-x86_64`
+            - macOS (M1/M2/M3): `rbxbuild-aarch64-apple-darwin`
+            - Linux ARM64 (for Apple Silicon Docker): `rbxbuild-aarch64-unknown-linux-musl`
+            - Linux x86_64 (for servers): `rbxbuild-x86_64-unknown-linux-musl`
+
+            Built from commit ${{ github.sha }}
           files: release-assets/*
