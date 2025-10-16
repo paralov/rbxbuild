@@ -4,126 +4,51 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux x86_64 (use muslrust container)
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            artifact_name: rbxbuild
-            use_muslrust: true
-
-          # Linux ARM64/aarch64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            artifact_name: rbxbuild
-            use_muslrust: false
-
-          # macOS
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: rbxbuild
-            use_muslrust: false
-
-          # Windows
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: rbxbuild.exe
-            use_muslrust: false
-
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Get version from Cargo.toml
-        id: get_version
-        shell: bash
+      - name: Get version
+        id: version
         run: |
-          VERSION=$(grep '^version = ' Cargo.toml | head -n1 | cut -d '"' -f2)
+          VERSION=$(grep '^version = ' Cargo.toml | cut -d '"' -f2)
           echo "version=v$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: v$VERSION"
+          echo "Building version $VERSION"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      # ---------- MUSL x86_64 build inside muslrust container ----------
-      - name: Build static musl binary
-        if: matrix.use_muslrust == true
-        uses: addnab/docker-run-action@v3
-        with:
-          image: clux/muslrust:stable
-          options: -v ${{ github.workspace }}:/volume
-          run: |
-            cd /volume
-            cargo build --release --target x86_64-unknown-linux-musl
-      # ----------------------------------------------------------------
-
-      # ---------- ARM64 MUSL cross-compilation ----------
-      - name: Install cross-compilation tools (ARM64 musl)
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: Install Rust & cross
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          wget https://musl.cc/aarch64-linux-musl-cross.tgz
-          tar -xf aarch64-linux-musl-cross.tgz
-          echo "$PWD/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc" >> $GITHUB_ENV
-          echo "CXX_aarch64_unknown_linux_musl=aarch64-linux-musl-g++" >> $GITHUB_ENV
-      # ----------------------------------------------------------------
+          rustup update stable
+          cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build binary (non-muslrust)
-        if: matrix.use_muslrust == false
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build all targets
+        run: |
+          cross build --release --target aarch64-apple-darwin
+          cross build --release --target aarch64-unknown-linux-musl
+          cross build --release --target x86_64-unknown-linux-musl
 
-      - name: Rename binary with target name
-        shell: bash
+      - name: Prepare artifacts
         run: |
           mkdir -p release-assets
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-assets/rbxbuild-${{ matrix.target }}.exe
-          else
-            cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-assets/rbxbuild-${{ matrix.target }}
-          fi
+          cp target/aarch64-apple-darwin/release/rbxbuild release-assets/rbxbuild-macos-arm64
+          cp target/aarch64-unknown-linux-musl/release/rbxbuild release-assets/rbxbuild-linux-arm64
+          cp target/x86_64-unknown-linux-musl/release/rbxbuild release-assets/rbxbuild-linux-x86_64
 
-      - name: Create/Update Release and Upload Assets
+      - name: Create/Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_version.outputs.version }}
-          name: Release ${{ steps.get_version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
           body: |
-            Automated release for version ${{ steps.get_version.outputs.version }}
-            
-            ## Changes
-            - Built from commit ${{ github.sha }}
-            
-            ## Download
-            Download the appropriate binary for your platform below:
-            
-            ### Linux
-            - `rbxbuild-x86_64-unknown-linux-musl` - x86_64 static (containers/Alpine)
-            - `rbxbuild-aarch64-unknown-linux-musl` - ARM64 static (containers/Alpine)
-            
-            ### macOS
-            - `rbxbuild-aarch64-apple-darwin` - Apple Silicon (M1/M2/M3)
-            
-            ### Windows
-            - `rbxbuild-x86_64-pc-windows-msvc.exe` - Windows x64
-          draft: false
-          prerelease: false
+            Automated release for version ${{ steps.version.outputs.version }}
+
+            ## Binaries
+            - macOS (M1/M2/M3): `rbxbuild-macos-arm64`
+            - Linux ARM64 (for Apple Silicon Docker): `rbxbuild-linux-arm64`
+            - Linux x86_64 (for servers): `rbxbuild-linux-x86_64`
           files: release-assets/*
