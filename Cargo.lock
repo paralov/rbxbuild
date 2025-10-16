@@ -1537,6 +1537,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbxbuild"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "log",
+ "rbx_dom_weak",
+ "rbx_reflection",
+ "rbx_reflection_database",
+ "rbx_xml",
+ "rojo",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1742,21 +1757,6 @@ dependencies = [
  "uuid",
  "winreg 0.10.1",
  "yaml-rust2",
-]
-
-[[package]]
-name = "rojo-build-lite"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "rbx_dom_weak",
- "rbx_reflection",
- "rbx_reflection_database",
- "rbx_xml",
- "rojo",
- "serde",
- "serde_json",
 ]
 
 [[package]]
