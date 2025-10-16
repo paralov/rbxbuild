@@ -1,0 +1,7 @@
+# Rust output directory
+/target
+/output
+
+# Macos file system junk
+._*
+.DS_STORE
